@@ -17,7 +17,7 @@ endif
 
 # Flags de compilação
 CFLAGS = -Wall -Wextra -std=c99
-LDFLAGS = 
+LDFLAGS =
 
 # Arquivos fonte e objeto
 SOURCES = util.c disk.c inode.c vfs.c myfs.c main.c
@@ -38,8 +38,8 @@ $(EXE): $(OBJECTS)
 # Alvo de limpeza
 clean:
 ifeq ($(OS),Windows_NT)
-	$(RM) *.o 2>NUL || exit 0
-	$(RM) $(EXE) 2>NUL || exit 0
+	-$(RM) $(OBJECTS) 2>NUL
+	-$(RM) $(EXE) 2>NUL
 else
 	$(RM) $(OBJECTS) $(EXE)
 endif
