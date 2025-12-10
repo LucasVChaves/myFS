@@ -1,0 +1,58 @@
+# Arquivos de build e executáveis
+*.o
+*.obj
+*.exe
+myfs
+myfs.exe
+
+# Arquivos de debug
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# Arquivos de dependências gerados automaticamente
+*.d
+
+# Bibliotecas compiladas
+*.lib
+*.a
+*.la
+*.lo
+*.so
+*.so.*
+*.dylib
+*.dll
+
+# Arquivos temporários
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+.*.swp
+.*.swo
+
+# Diretórios de build
+build/
+dist/
+out/
+
+# Arquivos do sistema
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDEs e editores
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.vcxproj*
+*.sln
+
+# Core dumps
+core
+core.*
