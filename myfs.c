@@ -1,7 +1,7 @@
 /*
 *  myfs.c - Implementacao do sistema de arquivos MyFS
 *
-*  Autores: SUPER_PROGRAMADORES_C
+*  Autores: Gabhriel Velasco, Lucas Chaves, Marcelo Rother 
 *  Projeto: Trabalho Pratico II - Sistemas Operacionais
 *  Organizacao: Universidade Federal de Juiz de Fora
 *  Departamento: Dep. Ciencia da Computacao
@@ -15,10 +15,11 @@
 #include "inode.h"
 #include "util.h"
 
-//Declaracoes globais
-//...
-//...
-
+typedef struct {
+  char filename[MAX_FILENAME_LENGTH];
+  unsigned int i_number;    // Numero do inode
+  unsigned char is_active;    // 1 se existe, 0 se apagado
+} DirEntry;
 
 //Funcao para verificacao se o sistema de arquivos está ocioso, ou seja,
 //se nao ha quisquer descritores de arquivos em uso atualmente. Retorna
@@ -124,5 +125,25 @@ int myFSCloseDir (int fd) {
 //o sistema de arquivos tenha sido registrado com sucesso.
 //Caso contrario, retorna -1
 int installMyFS (void) {
-	return -1;
+  FSInfo* fsinfo = malloc(sizeof(FSInfo));
+  printf("INSTALLMYFS: Erro ao gerar fsinfo\n");
+  if (!fsinfo) return -1;
+
+  fsinfo->fsid = 'F'; // Identificador unico
+  fsinfo->fsname = "FSMuitoFoda"; // Nome legivel do sistema de arquivos
+  
+  // Mapeando todas as funcoes anteriores pros metadados desse trem
+  fsinfo->isidleFn = myFSIsIdle;
+  fsinfo->formatFn = myFSFormat;
+  fsinfo->xMountFn = myFSxMount;
+  fsinfo->openFn = myFSOpen;
+  fsinfo->readFn = myFSRead;
+  fsinfo->writeFn = myFSWrite;
+  fsinfo->opendirFn = myFSOpenDir;
+  fsinfo->readdirFn = myFSReadDir;
+  fsinfo->linkFn = myFSLink;
+  fsinfo->unlinkFn = myFSUnlink;
+  fsinfo->closedirFn = myFSCloseDir;
+
+  return vfsRegisterFS(fsinfo);
 }

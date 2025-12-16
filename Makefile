@@ -1,6 +1,3 @@
-# Makefile para myFS - Compatível com Unix/Linux (gcc) e Windows (mingw)
-
-# Detectar o sistema operacional
 ifeq ($(OS),Windows_NT)
     # Windows
     CC = gcc
@@ -16,7 +13,7 @@ else
 endif
 
 # Flags de compilação
-CFLAGS = -Wall -Wextra -std=c99
+CFLAGS = -Wall -Wextra -std=c99 -D_POSIX_C_SOURCE=199309L
 LDFLAGS =
 
 # Arquivos fonte e objeto
