@@ -11,9 +11,22 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "myfs.h"
+#include "disk.h"
 #include "vfs.h"
 #include "inode.h"
 #include "util.h"
+
+#define MAGIC_NUMBER 0xBEBACAFE    // Assinatura que identifica a gente
+#define SB_SECTOR 0    // SuperBloco fica no setor 0
+#define INODE_AREA_START 2    // Os inodes comecam no setor 2 
+#define RESERVED_INODE_SECTORS 64    // 64 setores reservados para inodes (512 inodes)
+#define DATA_AREA_START (INODE_AREA_START + RESERVED_INODE_SECTORS)
+
+typedef struct {
+  unsigned int magic;    // Numero magico (assinatura)
+  unsigned int total_blocks;    // Total de setores do disco 
+  unsigned int free_blocks_start;    // Prox setor livre
+} SuperBlock;
 
 typedef struct {
   char filename[MAX_FILENAME_LENGTH];
@@ -21,11 +34,17 @@ typedef struct {
   unsigned char is_active;    // 1 se existe, 0 se apagado
 } DirEntry;
 
+SuperBlock sb;
+static Disk* curr_disk = NULL; 
+
+
 //Funcao para verificacao se o sistema de arquivos está ocioso, ou seja,
 //se nao ha quisquer descritores de arquivos em uso atualmente. Retorna
 //um positivo se ocioso ou, caso contrario, 0.
 int myFSIsIdle (Disk *d) {
-	return 0;
+	// Por enquanto vai ta sempre idle
+  // TODO: verificar se ha arquivos abertos
+  return 1;
 }
 
 //Funcao para formatacao de um disco com o novo sistema de arquivos
@@ -33,7 +52,38 @@ int myFSIsIdle (Disk *d) {
 //blocos disponiveis no disco, se formatado com sucesso. Caso contrario,
 //retorna -1.
 int myFSFormat (Disk *d, unsigned int blockSize) {
-	return -1;
+  unsigned long total_sectors = diskGetNumSectors(d);
+
+  sb.magic = MAGIC_NUMBER;
+  sb.total_blocks = total_sectors;
+  sb.free_blocks_start = DATA_AREA_START;
+
+  unsigned char buffer[DISK_SECTORDATASIZE];
+  // Zerar o buffer pra nao dar merda
+  for (int i = 0; i < DISK_SECTORDATASIZE; i++) {
+    buffer[i] = 0;
+  }
+
+  // Serializa os dados da struct pro buffer com o metodo q tem em util.h
+  ul2char(sb.magic, &buffer[0]);
+  ul2char(sb.total_blocks, &buffer[4]);
+  ul2char(sb.free_blocks_start, &buffer[8]);
+
+  if (diskWriteSector(d, SB_SECTOR, buffer) < 0) return -1;
+
+  // Cria root dir (inode 1)
+  Inode* root = inodeCreate(1, d);
+  if (!root) {
+    printf("MYFSFORMAT: Nao foi possivel criar o diretorio root \n");
+    return -1;
+  }
+
+  inodeSetFileType(root, FILETYPE_DIR);
+  inodeSetFileSize(root, 0);
+  inodeSave(root);
+  free(root);
+
+  return total_sectors;
 }
 
 //Funcao para montagem/desmontagem do sistema de arquivos, se possível.
@@ -42,7 +92,26 @@ int myFSFormat (Disk *d, unsigned int blockSize) {
 //de gravacao devem ser persistidos no disco. Retorna um positivo se a
 //montagem ou desmontagem foi bem sucedida ou, caso contrario, 0.
 int myFSxMount (Disk *d, int x) {
-	return 0;
+  // Montar disco
+  if (x == 1) {
+    unsigned char buffer[DISK_SECTORDATASIZE];
+    if (diskReadSector(d, SB_SECTOR, buffer) < 0) return 0;
+
+    char2ul(&buffer[0], &sb.magic);
+    char2ul(&buffer[4], &sb.total_blocks);
+    char2ul(&buffer[8], &sb.free_blocks_start);
+
+    // Assinatura invalida, ou seja, disco nao formatado ou corrompido
+    if (sb.magic != MAGIC_NUMBER) return 0;
+
+    curr_disk = d;
+    return 1;
+  } else { // Unmount
+    // Ao desmontar temos que salvar os trem que tavam no buffer no disco
+    // TODO salvar
+    curr_disk = NULL;
+    return 0;
+  }
 }
 
 //Funcao para abertura de um arquivo, a partir do caminho especificado
@@ -126,10 +195,12 @@ int myFSCloseDir (int fd) {
 //Caso contrario, retorna -1
 int installMyFS (void) {
   FSInfo* fsinfo = malloc(sizeof(FSInfo));
-  printf("INSTALLMYFS: Erro ao gerar fsinfo\n");
-  if (!fsinfo) return -1;
+  if (!fsinfo) {
+    printf("INSTALLMYFS: Erro ao gerar fsinfo\n");
+    return -1;
+  }
 
-  fsinfo->fsid = 'F'; // Identificador unico
+  fsinfo->fsid = 1; // Identificador unico
   fsinfo->fsname = "FSMuitoFoda"; // Nome legivel do sistema de arquivos
   
   // Mapeando todas as funcoes anteriores pros metadados desse trem
@@ -138,6 +209,7 @@ int installMyFS (void) {
   fsinfo->xMountFn = myFSxMount;
   fsinfo->openFn = myFSOpen;
   fsinfo->readFn = myFSRead;
+  fsinfo->closeFn = myFSClose;
   fsinfo->writeFn = myFSWrite;
   fsinfo->opendirFn = myFSOpenDir;
   fsinfo->readdirFn = myFSReadDir;
