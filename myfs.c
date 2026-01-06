@@ -37,6 +37,20 @@ typedef struct {
 SuperBlock sb;
 static Disk* curr_disk = NULL; 
 
+typedef struct {
+  int is_used;  // 1 se estiver em uso
+  int inode_number;  // Qual inode esta aberto 
+  unsigned int curr_offset_bytes;  // Cursor atual de leitura / escrita 
+} FileHandle;
+
+// GDT
+FileHandle open_files[MAX_FDS];
+
+void init_file_handles() {
+  for (int i = 0; i < MAX_FDS; i++) {
+    open_files[i].is_used = 0;
+  }
+}
 
 //Funcao para verificacao se o sistema de arquivos está ocioso, ou seja,
 //se nao ha quisquer descritores de arquivos em uso atualmente. Retorna
@@ -153,7 +167,26 @@ int myFSClose (int fd) {
 //criando o diretorio se nao existir. Retorna um descritor de arquivo,
 //em caso de sucesso. Retorna -1, caso contrario.
 int myFSOpenDir (Disk *d, const char *path) {
-	return -1;
+  // Validar se o path eh raiz. Usando '/' como root
+  if (path[0] != '/') return -1;
+
+  // Procura slot livre na tabela de arquivos
+  int fd = -1;
+  for (int i = 0; i < MAX_FDS; i++) {
+    if (!open_files[i].is_used) {
+      fd = i;
+      break;
+    }
+  }
+
+  if (fd == -1) return -1; // Tabela cheia
+
+  // Configura descritor
+  open_files[fd].is_used = 1;
+  open_files[fd].inode_number = 1; // Root sempre eh 1
+  open_files[fd].curr_offset_bytes = 0;
+
+  return fd + 1;
 }
 
 //Funcao para a leitura de um diretorio, identificado por um descritor
@@ -186,7 +219,13 @@ int myFSUnlink (int fd, const char *filename) {
 //Funcao para fechar um diretorio, identificado por um descritor de
 //arquivo existente. Retorna 0 caso bem sucedido, ou -1 caso contrario.	
 int myFSCloseDir (int fd) {
-	return -1;
+  int internal_fd = fd - 1;
+  if (internal_fd < 0 || internal_fd >= MAX_FDS) return -1;
+  if (!open_files[internal_fd].is_used) return -1;
+
+  // Libera slot 
+  open_files[internal_fd].is_used = 0;
+  return 0;
 }
 
 //Funcao para instalar seu sistema de arquivos no S.O., registrando-o junto
@@ -194,6 +233,7 @@ int myFSCloseDir (int fd) {
 //o sistema de arquivos tenha sido registrado com sucesso.
 //Caso contrario, retorna -1
 int installMyFS (void) {
+  init_file_handles();
   FSInfo* fsinfo = malloc(sizeof(FSInfo));
   if (!fsinfo) {
     printf("INSTALLMYFS: Erro ao gerar fsinfo\n");
