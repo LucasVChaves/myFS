@@ -10,6 +10,8 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <sys/select.h>
 #include "myfs.h"
 #include "disk.h"
 #include "vfs.h"
@@ -205,7 +207,73 @@ int myFSReadDir (int fd, char *filename, unsigned int *inumber) {
 //por filename e apontara' para o numero de i-node indicado por inumber.
 //Retorna 0 caso bem sucedido, ou -1 caso contrario.
 int myFSLink (int fd, const char *filename, unsigned int inumber) {
-	return -1;
+  // Validacao do FD, tem que ser o rootdir
+  int internal_fd = fd - 1;
+  if (internal_fd < 0 || internal_fd >= MAX_FDS || !open_files[internal_fd].is_used) return -1;
+  if (open_files[internal_fd].inode_number != 1) return -1;
+
+  Inode *root = inodeLoad(1, curr_disk);
+  if (!root) return -1;
+
+  unsigned char block[DISK_SECTORDATASIZE];
+  unsigned int block_addr;
+  unsigned int num_blocks = inodeGetFileSize(root) / DISK_SECTORDATASIZE;
+  if (inodeGetFileSize(root) % DISK_SECTORDATASIZE != 0) num_blocks++;
+
+  int saved = 0; // Flag de salvo com sucesso
+
+  // Tenta encontrar um slot livre
+  for (int i = 0; i < num_blocks; i++) {
+    block_addr = inodeGetBlockAddr(root, i);
+    if (block_addr == 0) continue;
+
+    diskReadSector(curr_disk, block_addr, block);
+    DirEntry *entries = (DirEntry*) block; 
+
+    int max_entries = DISK_SECTORDATASIZE / sizeof(DirEntry);
+
+    for (int j = 0; j < max_entries; j++) {
+      if (entries[j].is_active) {
+        strncpy(entries[j].filename, filename, MAX_FILENAME_LENGTH);
+        entries[j].i_number = inumber;
+        entries[j].is_active = 1;
+
+        diskWriteSector(curr_disk, block_addr, block);
+        saved = 1;
+        break;
+      }
+    }
+    if (saved) break;
+  }
+
+  // Se nao tem vaga, aloca um novo bloco 
+  if (!saved) {
+    // Numa implementacao real teriamos que usar um mapa de bits, mas aqui so iterar e achar um buraco serve
+    unsigned int new_block_addr = sb.free_blocks_start;
+    sb.free_blocks_start++;
+
+    for (int i = 0; i < DISK_SECTORDATASIZE; i++) {
+      // Zerando o setor pra nn ter lixo
+      block[i] = 0;
+    }
+
+    DirEntry *entries = (DirEntry*) block;
+    strncpy(entries[0].filename, filename, MAX_FILENAME_LENGTH);
+    entries[0].i_number = inumber;
+    entries[0].is_active = 1;
+
+    if (inodeAddBlock(root, new_block_addr) == 0) {
+      diskWriteSector(curr_disk, new_block_addr, block);
+
+      // Atualiza o tamanho do dir
+      unsigned new_size = (inodeGetFileSize(root) > 0) ? inodeGetFileSize(root) + DISK_SECTORDATASIZE : DISK_SECTORDATASIZE;
+      inodeSetFileSize(root, new_size);
+      inodeSave(root);
+      saved = 1;
+    }
+  }
+  free(root);
+  return saved ? 0 : -1;
 }
 
 //Funcao para remover uma entrada existente em um diretorio, 
@@ -213,7 +281,45 @@ int myFSLink (int fd, const char *filename, unsigned int inumber) {
 //identificada pelo nome indicado em filename. Retorna 0 caso bem
 //sucedido, ou -1 caso contrario.
 int myFSUnlink (int fd, const char *filename) {
-	return -1;
+  int internal_fd = fd - 1;
+  if (internal_fd < 0 || internal_fd >= MAX_FDS || !open_files[internal_fd].is_used) return -1;
+
+  Inode *root = inodeLoad(1, curr_disk);
+  if (!root) return -1;
+
+  unsigned char block[DISK_SECTORDATASIZE];
+  unsigned int block_addr;
+  unsigned int num_blocks = inodeGetFileSize(root) / DISK_SECTORDATASIZE;
+  if (inodeGetFileSize(root) % DISK_SECTORDATASIZE != 0) num_blocks++;
+
+  int found = 0;
+
+  for (int i = 0; i < num_blocks; i++) {
+    block_addr = inodeGetBlockAddr(root, i);
+    if (block_addr == 0) continue;
+
+    diskReadSector(curr_disk, block_addr, block);
+    DirEntry *entries = (DirEntry*) block;
+    int max_entries = DISK_SECTORDATASIZE / sizeof(DirEntry);
+
+    for (int j = 0; j < max_entries; j++) {
+      if (entries[j].is_active && strcmp(entries[0].filename, filename) == 0) {
+        entries[j].is_active = 0;
+        Inode* file_node = inodeLoad(entries[j].i_number, curr_disk);
+        if (file_node) {
+          inodeClear(file_node);
+          free(file_node);
+        } 
+        
+        diskWriteSector(curr_disk, block_addr, block);
+        found = 1;
+        break;
+      }
+      if (found) break;
+    }
+  }
+  free(root);
+  return found ? 0 : -1;
 }
 
 //Funcao para fechar um diretorio, identificado por um descritor de
