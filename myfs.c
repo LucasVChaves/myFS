@@ -8,8 +8,9 @@
 *
 */
 
-#include <stdio.h>
-#include <stdlib.h>
+#include "stdio.h"
+#include "stdlib.h"
+#include "string.h"
 #include "myfs.h"
 #include "disk.h"
 #include "vfs.h"
@@ -97,6 +98,13 @@ int myFSFormat (Disk *d, unsigned int blockSize) {
   inodeSave(root);
   free(root);
 
+  unsigned int num_inodes = RESERVED_INODE_SECTORS * (DISK_SECTORDATASIZE / 16); // 16 = tamanho inode
+  for (unsigned int i = 2; i <= num_inodes; i++) {
+      Inode *temp = inodeCreate(i, d);
+      if (temp) free(temp);
+  }
+
+
   return total_sectors;
 }
 
@@ -133,7 +141,128 @@ int myFSxMount (Disk *d, int x) {
 //criando o arquivo se nao existir. Retorna um descritor de arquivo,
 //em caso de sucesso. Retorna -1, caso contrario.
 int myFSOpen (Disk *d, const char *path) {
-	return -1;
+  if(path[0] != '/') return -1;
+  const char *filename = path + 1;
+
+  int fd_idx = -1;
+  for (int i = 0; i < MAX_FDS; i++) {
+    if (!open_files[i].is_used) {
+      fd_idx = i;
+      break;
+    }
+  }
+  if (fd_idx == -1) return -1;
+
+  Inode* root = inodeLoad(1, d);
+  if(!root) return -1;
+
+  unsigned int target_inode = 0;
+  unsigned int fileSize = inodeGetFileSize(root);
+  unsigned int offset = 0;
+  DirEntry entry;
+
+  // Busca arquivo
+  while (offset < fileSize) {
+        unsigned int blk_idx = offset / DISK_SECTORDATASIZE;
+        unsigned int blk_off = offset % DISK_SECTORDATASIZE;
+        unsigned int blk_addr = inodeGetBlockAddr(root, blk_idx);
+        
+        unsigned char buffer[DISK_SECTORDATASIZE];
+        if (blk_addr > 0) {
+            diskReadSector(d, blk_addr, buffer);
+            memcpy(&entry, buffer + blk_off, sizeof(DirEntry));
+        }
+        
+        if (entry.is_active && strcmp(entry.filename, filename) == 0) {
+            target_inode = entry.i_number;
+            break;
+        }
+        offset += sizeof(DirEntry);
+  }
+
+  // Se nao existe, cria
+  if (target_inode == 0) {
+        target_inode = inodeFindFreeInode(2, d);
+        if (target_inode == 0) { free(root); return -1; }
+
+        Inode* newFile = inodeCreate(target_inode, d);
+        if (!newFile) { free(root); return -1; }
+        
+        inodeSetFileType(newFile, FILETYPE_REGULAR);
+        inodeSetRefCount(newFile, 1);
+        inodeSave(newFile);
+        free(newFile);
+
+        // Adiciona ao diretorio
+        DirEntry newEntry;
+        memset(&newEntry, 0, sizeof(DirEntry));
+        strncpy(newEntry.filename, filename, 251);
+        newEntry.i_number = target_inode;
+        newEntry.is_active = 1;
+
+        int linked = 0;
+        offset = 0;
+        // Tenta achar buraco
+        while (offset < fileSize) {
+            unsigned int blk_idx = offset / DISK_SECTORDATASIZE;
+            unsigned int blk_off = offset % DISK_SECTORDATASIZE;
+            unsigned int blk_addr = inodeGetBlockAddr(root, blk_idx);
+            unsigned char buffer[DISK_SECTORDATASIZE];
+            
+            diskReadSector(d, blk_addr, buffer);
+            memcpy(&entry, buffer + blk_off, sizeof(DirEntry));
+            
+            if (!entry.is_active) {
+                memcpy(buffer + blk_off, &newEntry, sizeof(DirEntry));
+                diskWriteSector(d, blk_addr, buffer);
+                linked = 1;
+                break;
+            }
+            offset += sizeof(DirEntry);
+        }
+
+        if (!linked) {
+            // Append no final
+            unsigned int blk_idx = fileSize / DISK_SECTORDATASIZE;
+            unsigned int blk_off = fileSize % DISK_SECTORDATASIZE;
+            unsigned int blk_addr = inodeGetBlockAddr(root, blk_idx);
+            
+            // Aloca bloco se necessario (Inline)
+            if (blk_addr == 0) {
+                if (sb.free_blocks_start < sb.total_blocks) {
+                    blk_addr = sb.free_blocks_start;
+                    sb.free_blocks_start++;
+                    // Salva SB
+                    unsigned char sb_buf[DISK_SECTORDATASIZE] = {0};
+                    ul2char(sb.magic, &sb_buf[0]);
+                    ul2char(sb.total_blocks, &sb_buf[4]);
+                    ul2char(sb.free_blocks_start, &sb_buf[8]);
+                    diskWriteSector(d, SB_SECTOR, sb_buf);
+                    
+                    // Zera bloco
+                    unsigned char clean[DISK_SECTORDATASIZE] = {0};
+                    diskWriteSector(d, blk_addr, clean);
+                    inodeAddBlock(root, blk_addr);
+                } else {
+                    free(root); return -1;
+                }
+            }
+            
+            unsigned char buffer[DISK_SECTORDATASIZE];
+            diskReadSector(d, blk_addr, buffer);
+            memcpy(buffer + blk_off, &newEntry, sizeof(DirEntry));
+            diskWriteSector(d, blk_addr, buffer);
+            
+            inodeSetFileSize(root, fileSize + sizeof(DirEntry));
+            inodeSave(root);
+        }
+  }
+
+  free(root);
+  open_files[fd_idx].is_used = 1;
+  open_files[fd_idx].inode_number = target_inode;
+  open_files[fd_idx].curr_offset_bytes = 0;
+  return fd_idx + 1;
 }
 	
 //Funcao para a leitura de um arquivo, a partir de um descritor de arquivo
