@@ -285,6 +285,59 @@ int myFSWrite (int fd, const char *buf, unsigned int nbytes) {
 	return -1;
 }
 
+
+int myFSWrite (int fd, const char *buf, unsigned int nbytes) {
+  int idx = fd - 1;
+  if (idx < 0 || idx >= MAX_FDS || !open_files[idx].is_used) return -1;
+
+  Inode* inode = inodeLoad(open_files[idx].inode_number, curr_disk);
+  if (!inode) return -1;
+
+  unsigned int bytesWritten = 0;
+  while (bytesWritten < nbytes) {
+      unsigned int absPos = open_files[idx].curr_offset_bytes + bytesWritten;
+      unsigned int blk_idx = absPos / DISK_SECTORDATASIZE;
+      unsigned int blk_off = absPos % DISK_SECTORDATASIZE;
+      unsigned int chunk = DISK_SECTORDATASIZE - blk_off;
+      unsigned int blk_addr = inodeGetBlockAddr(inode, blk_idx);
+
+      if (chunk > (nbytes - bytesWritten)) chunk = nbytes - bytesWritten;
+
+      // Aloca bloco se precisar
+      if (blk_addr == 0) {
+          if (sb.free_blocks_start < sb.total_blocks) {
+              blk_addr = sb.free_blocks_start;
+              sb.free_blocks_start++;
+              
+              unsigned char sb_buf[DISK_SECTORDATASIZE] = {0};
+              ul2char(sb.magic, &sb_buf[0]);
+              ul2char(sb.total_blocks, &sb_buf[4]);
+              ul2char(sb.free_blocks_start, &sb_buf[8]);
+              diskWriteSector(curr_disk, SB_SECTOR, sb_buf);
+
+              inodeAddBlock(inode, blk_addr);
+          } else {
+              break; // Disco cheio
+          }
+      }
+
+      unsigned char buffer[DISK_SECTORDATASIZE];
+      if (chunk < DISK_SECTORDATASIZE) diskReadSector(curr_disk, blk_addr, buffer);
+    
+      memcpy(buffer + blk_off, buf + bytesWritten, chunk);
+      diskWriteSector(curr_disk, blk_addr, buffer);
+      bytesWritten += chunk;
+  }
+  
+  open_files[idx].curr_offset_bytes += bytesWritten;
+  if (open_files[idx].curr_offset_bytes > inodeGetFileSize(inode)) {
+      inodeSetFileSize(inode, open_files[idx].curr_offset_bytes);
+      inodeSave(inode);
+  }
+  free(inode);
+  return bytesWritten;
+}
+
 //Funcao para fechar um arquivo, a partir de um descritor de arquivo
 //existente. Retorna 0 caso bem sucedido, ou -1 caso contrario
 int myFSClose (int fd) {
