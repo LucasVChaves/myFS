@@ -325,11 +325,6 @@ int myFSRead (int fd, char *buf, unsigned int nbytes) {
 //proximo byte apos o ultimo escrito. Retorna o numero de bytes
 //efetivamente escritos em caso de sucesso ou -1, caso contrario
 int myFSWrite (int fd, const char *buf, unsigned int nbytes) {
-	return -1;
-}
-
-
-int myFSWrite (int fd, const char *buf, unsigned int nbytes) {
   int idx = fd - 1;
   if (idx < 0 || idx >= MAX_FDS || !open_files[idx].is_used) return -1;
 
