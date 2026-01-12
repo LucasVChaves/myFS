@@ -8,6 +8,7 @@
 *
 */
 
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -379,7 +380,16 @@ int myFSWrite (int fd, const char *buf, unsigned int nbytes) {
 //Funcao para fechar um arquivo, a partir de um descritor de arquivo
 //existente. Retorna 0 caso bem sucedido, ou -1 caso contrario
 int myFSClose (int fd) {
-	return -1;
+  int internal_fd = fd - 1; 
+  if (internal_fd < 0 || internal_fd >= MAX_FDS) return -1;
+  if (!open_files[internal_fd].is_used) return -1;
+
+  // Libera o dscritor 
+  open_files[internal_fd].is_used = 0;
+  open_files[internal_fd].inode_number = 0;
+  open_files[internal_fd].curr_offset_bytes = 0;
+
+  return 0;
 }
 
 //Funcao para abertura de um diretorio, a partir do caminho
@@ -417,7 +427,61 @@ int myFSOpenDir (Disk *d, const char *path) {
 //Retorna 1 se uma entrada foi lida, 0 se fim de diretorio ou -1 caso
 //mal sucedido
 int myFSReadDir (int fd, char *filename, unsigned int *inumber) {
-	return -1;
+  int internal_fd = fd - 1;
+  if (internal_fd < 0 || internal_fd >= MAX_FDS) return -1;
+  if (!open_files[internal_fd].is_used) return -1;
+
+  // Garante que eh root 
+  if (open_files[internal_fd].inode_number != 1) return -1;
+
+  Inode *root = inodeLoad(1, curr_disk);
+  if (!root) return -1;
+
+  unsigned int file_size = inodeGetFileSize(root);
+  unsigned char block[DISK_SECTORDATASIZE];
+
+  // Itera sobre o arquivo procurando a prox entrada ativa ou ate acabar o arquivo
+  while (open_files[internal_fd].curr_offset_bytes < file_size) {
+    unsigned int offset = open_files[internal_fd].curr_offset_bytes;
+    // Qual bloco estamos
+    unsigned int sector_idx = offset / DISK_SECTORDATASIZE;
+    unsigned int offset_in_sector = offset % DISK_SECTORDATASIZE;
+
+    // Verifica se tem lacuna no fim do arquivo, se o tamanho da entrada for maior que o tamanho restante
+    // ela deve ser alinhada no prox setor
+    if (offset_in_sector + sizeof(DirEntry) > DISK_SECTORDATASIZE) {
+      open_files[internal_fd].curr_offset_bytes = (sector_idx + 1) * DISK_SECTORDATASIZE;
+      continue;
+    }  
+
+    unsigned long block_addr = inodeGetBlockAddr(root, sector_idx);
+
+    // Leitura do setor propriamente dita 
+    if (diskReadSector(curr_disk, block_addr, block) < 0) {
+      free(root);
+      return -1;
+    }
+
+    // Entrada especifica dentro do buffer
+    DirEntry *entry = (DirEntry*)(block + offset_in_sector);
+
+    // Avanca o cursor para proxima chamada
+    open_files[internal_fd].curr_offset_bytes += sizeof(DirEntry);
+
+    // Se for valida retornamos ela
+    if (entry->is_active) {
+      strncpy(filename, entry->filename, MAX_FILENAME_LENGTH);
+      filename[MAX_FILENAME_LENGTH] = '\0'; // Null-termination
+      *inumber = entry->i_number;
+      
+      free(root);
+      return 1;
+    }
+  }
+
+  // Fim do dir, nao achou mais ngm
+  free(root);
+  return 0;
 }
 
 //Funcao para adicionar uma entrada a um diretorio, identificado por um
