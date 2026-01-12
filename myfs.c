@@ -137,7 +137,7 @@ int myFSxMount (Disk *d, int x) {
     // Ao desmontar temos que salvar os trem que tavam no buffer no disco
     // TODO salvar
     curr_disk = NULL;
-    return 0;
+    return 1;
   }
 }
 
@@ -232,7 +232,7 @@ int myFSOpen (Disk *d, const char *path) {
             unsigned int blk_off = fileSize % DISK_SECTORDATASIZE;
             unsigned int blk_addr = inodeGetBlockAddr(root, blk_idx);
             
-            // Aloca bloco se necessario (Inline)
+            // Aloca bloco se necessario
             if (blk_addr == 0) {
                 if (sb.free_blocks_start < sb.total_blocks) {
                     blk_addr = sb.free_blocks_start;
