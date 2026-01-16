@@ -119,7 +119,7 @@ int myFSFormat (Disk *d, unsigned int blockSize) {
 //de gravacao devem ser persistidos no disco. Retorna um positivo se a
 //montagem ou desmontagem foi bem sucedida ou, caso contrario, 0.
 int myFSxMount (Disk *d, int x) {
-  // Montar disco
+  // Montar disco x=1
   if (x == 1) {
     unsigned char buffer[DISK_SECTORDATASIZE];
     if (diskReadSector(d, SB_SECTOR, buffer) < 0) return 0;
@@ -133,9 +133,21 @@ int myFSxMount (Disk *d, int x) {
 
     curr_disk = d;
     return 1;
-  } else { // Unmount
+  } else { // Unmount x=0
     // Ao desmontar temos que salvar os trem que tavam no buffer no disco
-    // TODO salvar
+    if (!curr_disk) return 0;
+
+    // Limpa o buffer
+    unsigned char buffer[DISK_SECTORDATASIZE];
+    for (int i = 0; i < DISK_SECTORDATASIZE; i++) buffer[i] = 0;
+
+    // Serializa o superbloco que ta na memoria para o buffer
+    ul2char(sb.magic, &buffer[0]);
+    ul2char(sb.total_blocks, &buffer[4]);
+    ul2char(sb.free_blocks_start, &buffer[8]);
+
+    if (diskWriteSector(d, SB_SECTOR, buffer) < 0) return 0;
+
     curr_disk = NULL;
     return 1;
   }
