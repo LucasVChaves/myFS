@@ -62,8 +62,15 @@ void init_file_handles() {
 //se nao ha quisquer descritores de arquivos em uso atualmente. Retorna
 //um positivo se ocioso ou, caso contrario, 0.
 int myFSIsIdle (Disk *d) {
-	// Por enquanto vai ta sempre idle
-  // TODO: verificar se ha arquivos abertos
+  // Se o disco consultado nao for o nosso, foda-se pra la
+	if (d != curr_disk) return 1;
+
+  // Varre GDT procurando qualquer um slot em uso, ou seja, nao esta idle 
+  for (int i = 0; i < MAX_FDS; i++) {
+    if (open_files[i].is_used) return 0; 
+  }
+
+  // Se passou por todo mundo e nao achou ngm is_used = 1, esta idling
   return 1;
 }
 
